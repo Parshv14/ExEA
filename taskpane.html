@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Excel Command Assistant</title>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<style>
+:root{--bg:#fbfbf9;--fg:#1d2420;--mut:#6b7570;--line:#d5dad6;--hd:#eef1ee;--ac:#0f7b45;--sel:#d9f0e3;--chg:#ffe27a;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#141815;--fg:#e8ede9;--mut:#8f9a94;--line:#323b35;--hd:#1d231f;--ac:#47d08a;--sel:#17402b;--chg:#6b5a12;--card:#1a201c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:12px;max-width:980px;margin-inline:auto}
+h1{font-size:18px;margin:0 0 2px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:10px}
+.bar{display:flex;gap:6px}
+#cmd{flex:1;min-width:0;padding:11px 12px;font-size:16px;border:2px solid var(--ac);border-radius:8px;background:var(--card);color:var(--fg)}
+button,select{font:inherit;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);cursor:pointer}
+button.go{background:var(--ac);color:#fff;border-color:var(--ac)}
+button.on{background:#c0392b;color:#fff;border-color:#c0392b}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chips button{font-size:12.5px;padding:5px 9px;border-radius:99px;color:var(--mut)}
+#stats{font-size:12.5px;color:var(--mut);margin:4px 0}
+#log{font-size:13.5px;margin:6px 0 10px;min-height:20px}
+#log div{padding:3px 0;border-bottom:1px solid var(--line)}
+.bd{display:inline-block;min-width:44px;text-align:center;font-size:11.5px;border-radius:4px;padding:1px 5px;margin-right:6px;background:var(--sel);color:var(--ac)}
+.bd.ai{background:#e8def8;color:#5b3ea6}
+.nb{display:inline-block;font-weight:600;padding:2px 10px;border:1px solid var(--line);border-radius:6px;background:var(--hd);margin-bottom:6px}
+#wrap{overflow:auto;max-height:52vh;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse;width:100%;table-layout:fixed;min-width:560px}
+th{background:var(--hd);color:var(--mut);font-weight:500;font-size:12px;position:sticky;top:0}
+th:first-child{width:34px;left:0}
+th,td{border:1px solid var(--line);height:28px;padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+td.tb{border:1.5px solid var(--ac)}
+td.sel{outline:2px solid var(--ac);outline-offset:-2px;background:var(--sel)}
+td.chg{animation:f 1.8s}
+@keyframes f{from{background:var(--chg)}}
+@media(prefers-reduced-motion:reduce){td.chg{animation:none;background:var(--chg)}}
+details{margin-top:10px;font-size:13.5px}
+#rl div{padding:4px 0;border-bottom:1px solid var(--line)}#rl button{padding:0 7px;margin-left:6px}
+details label{display:block;margin:6px 0 2px;color:var(--mut)}
+details input,details select{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+.row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+
+body{padding:10px}#cmd{font-size:15px}.chips button{font-size:12px}
+</style></head>
+<body>
+<h1>Command assistant</h1>
+<div class="sub">Works on your open sheet. Active cell: <span class="nb" id="nb">–</span></div>
+<div class="bar">
+  <input id="cmd" placeholder="e.g. 22 in front of Ravi" autocomplete="off">
+  <button id="mic" title="Voice">🎤</button><button id="teach" title="Teach a rule">🧠</button><button class="go" id="run">Run</button>
+</div>
+<div class="chips" id="chips">
+  <button data-c="header name, marks">header name, marks</button>
+  <button data-c="ravi 22, sita 35, amit 10">ravi 22, sita 35, amit 10</button>
+  <button data-c="total">total</button><button data-c="percentage">percentage</button>
+  <button data-c="sort B desc">sort B desc</button><button data-c="next">next</button>
+  <button data-c="undo">undo</button><button data-c="redo">redo</button>
+</div>
+<div id="stats"></div>
+<div id="log"></div>
+<details id="rb" open><summary>My rules (<span id="rc">0</span>)</summary><div id="rl"></div></details>
+<details>
+  <summary>Settings: AI and voice</summary>
+  <label>Groq API key (optional)</label><input id="gkey" type="password" placeholder="gsk_..." autocomplete="off">
+  <label>Gemini API key (optional)</label><input id="mkey" type="password" placeholder="AIza..." autocomplete="off">
+  <div class="row"><button id="test">Test AI</button><span id="tst"></span></div>
+  <label>Voice language</label>
+  <select id="lang"><option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option><option value="en-US">English (US)</option></select>
+  <label><input type="checkbox" id="hf" style="width:auto"> Hands-free</label>
+</details>
+<script>
+const R=500,C=26,$=id=>document.getElementById(id);const FX={},FM={},OPS=[];
+let data={},tables=[],act={r:0,c:0},undo=[],redo=[],st={nameCol:null,valCol:null,dir:'down',lw:null},stats={cmd:0,ai:0},changed=new Set();
+const col=i=>String.fromCharCode(65+i),key=(r,c)=>col(c)+(r+1),get=(r,c)=>data[key(r,c)]??'';
+const isNum=v=>v!==''&&!isNaN(Number(v)),fmt=x=>String(+x.toFixed(2));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num='-?\\d+(?:\\.\\d+)?';
+function note(r,c){const l=st.lw;if(l){if(l.r===r&&c===l.c+1)st.dir='right';else if(l.r===r&&c===l.c-1)st.dir='left';else if(l.c===c&&r===l.r+1)st.dir='down';else if(l.c===c&&r===l.r-1)st.dir='up'}st.lw={r,c}}
+function set(r,c,v){if(r<0||c<0||r>=R||c>=C)return;const k=key(r,c);v=String(v);if(v==='')delete data[k];else{data[k]=v;note(r,c)}changed.add(k)}
+function pa(a){const m=/^([a-z])(\d+)$/i.exec(a);if(!m)return null;const r=+m[2]-1,c=m[1].toUpperCase().charCodeAt(0)-65;return r>=0&&r<R?{r,c}:null}
+function mv(d,n=1){if(d=='up')act.r=Math.max(0,act.r-n);if(d=='down')act.r=Math.min(R-1,act.r+n);if(d=='left')act.c=Math.max(0,act.c-n);if(d=='right')act.c=Math.min(C-1,act.c+n)}
+
+/* ---------- rule engine (no AI, instant) ---------- */
+function table(t){
+  const l=t.toLowerCase();let m,rows,cols;
+  if(!/creat|make|add|insert|table/.test(l))return null;
+  if(m=l.match(/(\d+)\s*rows?\s*(?:and|,|x|by|&)?\s*(\d+)\s*col/)){rows=+m[1];cols=+m[2]}
+  else if(m=l.match(/(\d+)\s*(?:x|by)\s*(\d+)\s*table/)){rows=+m[1];cols=+m[2]}
+  else return null;
+  rows=Math.min(rows,R-act.r);cols=Math.min(cols,C-act.c);
+  tables.push({r:act.r,c:act.c,rows,cols});OPS.push({t:'table',r:act.r,c:act.c,rows,cols});
+  return 'Table '+rows+'×'+cols+' at '+key(act.r,act.c);
+}
+function rules(t){
+  let m;
+  if(m=t.match(/^(?:headers?|heading|titles?)\s+(.+)$/i)){const it=(m[1].includes(',')?m[1].split(/\s*,\s*/):m[1].split(/\s+/)).filter(Boolean),r=act.r,c0=act.c;it.forEach((x,i)=>set(r,c0+i,x));OPS.push({t:'bold',r,c:c0,n:it.length});if(it.length>1){st.nameCol=c0;st.valCol=c0+1}st.dir='down';act={r:Math.min(R-1,r+1),c:c0};return 'Headers in row '+(r+1)}
+  if(m=t.match(/^list\s*[:\-]?\s+(.+)$/i)){const it=m[1].split(/\s*,\s*/).filter(Boolean),r=act.r;it.forEach((x,i)=>set(r+i,act.c,x));st.dir='down';act.r=Math.min(R-1,r+it.length);return it.length+' items from '+key(r,act.c)}
+  const tm=table(t);if(tm)return tm;
+  if(/\brow\s*\d+\s*(,|and)\s*col/i.test(t))return one(t);
+  const parts=t.split(/\s+and\s+|;|\s*,\s*/i).map(s=>s.trim()).filter(Boolean);
+  if(parts.length>1){const o=[];for(const p of parts){const x=one(p);if(x===null)return null;o.push(x)}return o.join(' | ')}
+  return one(t);
+}
+function one(t,depth=0){
+  let m,s=t.replace(/^(please|pls)\s+/i,'').trim(),l=s.toLowerCase();
+  const ur=userRules(l,depth);if(ur!==null)return ur;
+  if(m=l.match(/^(?:go to|goto|select)\s+(?:the\s+)?(?:first\s+)?empty\s+(?:cell\s+)?(?:in\s+)?(?:column\s+)?([a-z])$/)){const c=m[1].toUpperCase().charCodeAt(0)-65;let r=R-1;while(r>=0&&get(r,c)==='')r--;act={r:Math.min(R-1,r+1),c};return 'Went to '+key(act.r,act.c)}
+  if(m=l.match(/^(?:go |move )?(up|down|left|right)(?: (\d+))?$/)){mv(m[1],+(m[2]||1));st.dir=m[1];return 'Moved '+m[1]+' to '+key(act.r,act.c)+' (typing and next now go '+m[1]+')'}
+  if(m=l.match(/^(?:go to|goto|select)\s+([a-z]\d+)$/)){const a=pa(m[1]);if(!a)return '⚠ Bad cell';act=a;return 'Selected '+m[1].toUpperCase()}
+  if(m=l.match(/^sort(?: by)?(?: column)?\s*([a-z])?(?:\s+(asc|ascending|desc|descending|high to low|low to high|largest|smallest))?$/))return sortRows(m[1]?m[1].toUpperCase().charCodeAt(0)-65:act.c,/desc|high to low|largest/.test(m[2]||''));
+  if(m=l.match(/^clear\s+(?:column|col)\s+([a-z])$/)){const c=m[1].toUpperCase().charCodeAt(0)-65;for(let r=0;r<R;r++)set(r,c,'');return 'Cleared column '+m[1].toUpperCase()}
+  if(/^clear\s+(all|sheet|everything)$/.test(l)){data={};tables=[];return 'Sheet cleared'}
+  if(m=l.match(/^(?:delete|remove)\s+row(?:\s+(\d+))?$/)){const r=m[1]?+m[1]-1:act.r;OPS.push({t:'del',r});return 'Deleted row '+(r+1)}
+  if(m=l.match(/^insert\s+row(?:\s+(\d+))?$/)){const r=m[1]?+m[1]-1:act.r;OPS.push({t:'ins',r});return 'Inserted row at '+(r+1)}
+  if(l==='clear'){set(act.r,act.c,'');return 'Cleared '+key(act.r,act.c)}
+  if(m=l.match(/^(?:calculate\s+|find\s+|get\s+)?(total|sum|average|avg|mean|max|maximum|min|minimum|count|percentage|percentages|percent)$/))return calc(m[1]);
+  if(m=l.match(/^(repeat|same|copy)(?:\s+(\d+))?$/))return pattern(+(m[2]||1),true);
+  if(m=l.match(/^(next|ok|okay|yes|continue|fill|go on)(?:\s+(\d+))?$/))return pattern(+(m[2]||1));
+  const pre=/^(write|enter|type|put|add)\s+/i.test(s);
+  s=s.replace(/^(write|enter|type|put|add)\s+/i,'');
+  if(!pre&&uRules.some(x=>x.type==='lookup')){const f=lookupRule(s);if(f!==null)return f}
+  if(m=s.match(/^(.+?)\s+(?:in front of|infront of|in front|against|next to|beside)\s+(.+)$/i))return front(m[2],m[1]);
+  if(m=s.match(new RegExp('^(?:in front of|against)\\s+(.+?)\\s+('+num+')$','i')))return front(m[1],m[2]);
+  if(m=s.match(/^(.+?)\s+in\s+(?:cell\s+)?([a-z]\d+)$/i)){const a=pa(m[2]);if(!a)return '⚠ Bad cell';act=a;set(a.r,a.c,m[1]);return m[2].toUpperCase()+' = '+m[1]}
+  if(m=s.match(/^(.+?)\s+in\s+row\s*(\d+)\s*,?\s*col(?:umn)?\s*(\d+)$/i)){const r=+m[2]-1,c=+m[3]-1;if(r<0||c<0||r>=R||c>=C)return '⚠ Out of range';act={r,c};set(r,c,m[1]);return key(r,c)+' = '+m[1]}
+  if(m=s.match(/^(.+?)\s+in\s+(?:the\s+)?next\s+(row|column|col|cell)$/i)){if(/^col/i.test(m[2]))act.c=Math.min(C-1,act.c+1);else act.r=Math.min(R-1,act.r+1);set(act.r,act.c,m[1]);return key(act.r,act.c)+' = '+m[1]}
+  if(m=s.match(/^(.+?)\s+(?:in\s+(?:the\s+)?(?:current|active)(?:\s+active)?(?:\s+cell)?|here)$/i)){set(act.r,act.c,m[1]);return key(act.r,act.c)+' = '+m[1]}
+  if(new RegExp('^'+num+'$').test(s)||pre){set(act.r,act.c,s);const k=key(act.r,act.c);adv();return k+' = '+s}
+  if(m=s.match(new RegExp('^([^\\d\\-].{0,38}?)\\s+('+num+')$')))return nameNum(m[1].trim(),m[2]);
+  if(!/^(delete|remove|sort|make|bold|merge|swap|copy|convert|calculate|find|show|highlight|format|fill|change|replace|round|insert|create)\b/i.test(s)&&s.split(/\s+/).length<=4){set(act.r,act.c,s);const k=key(act.r,act.c);adv();return k+' = '+s}
+  return null;
+}
+function findName(n){n=n.toLowerCase().trim();for(const k in data){if(!isNum(data[k])&&data[k].toLowerCase().trim()===n){const p=pa(k);if(p)return p}}return null}
+function front(name,val){
+  const p=findName(name);if(!p)return '⚠ "'+name+'" not found in the sheet';
+  let c=(st.valCol!==null&&st.valCol>p.c)?st.valCol:p.c+1;
+  if(st.valCol===null){while(c<C-1&&get(p.r,c)!=='')c++}
+  set(p.r,c,val);st.nameCol=p.c;st.valCol=c;st.dir='down';act={r:p.r,c};
+  return name+' → '+key(p.r,c)+' = '+val;
+}
+function nameNum(name,val){
+  if(findName(name))return front(name,val);
+  const nc=st.nameCol??act.c,vc=st.valCol??Math.min(nc+1,C-1);
+  let r=R-1;while(r>=0&&get(r,nc)==='')r--;r=(r<0?act.r:r+1);
+  if(r>=R)return '⚠ Sheet is full';
+  set(r,nc,name);set(r,vc,val);st.nameCol=nc;st.valCol=vc;st.dir='down';act={r,c:vc};
+  return 'Added row '+(r+1)+': '+name+' = '+val;
+}
+const SEQ=[['mon','tue','wed','thu','fri','sat','sun'],['monday','tuesday','wednesday','thursday','friday','saturday','sunday'],['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'],['january','february','march','april','may','june','july','august','september','october','november','december']];
+function predict(v){
+  const L=v[v.length-1],l=L.toLowerCase();
+  for(const q of SEQ){const i=q.indexOf(l);if(i>=0){const x=q[(i+1)%q.length];return L[0]===L[0].toUpperCase()?x[0].toUpperCase()+x.slice(1):x}}
+  if(v.length>=2&&v.every(isNum)){const n=v.map(Number),d=n[n.length-1]-n[n.length-2];return String(+(n[n.length-1]+d).toFixed(6))}
+  const m=L.match(/^(.*?)(\d+)$/);
+  if(m&&!isNum(L))return m[1]+String(+m[2]+1).padStart(m[2].length,'0');
+  if(v.length>=2&&v.every(x=>x===L))return L;
+  return null;
+}
+function pattern(n,force){
+  const [dr,dc]={down:[1,0],up:[-1,0],right:[0,1],left:[0,-1]}[st.dir||'down'],out=[];
+  let r=act.r,c=act.c;
+  if(get(r,c)!==''){r+=dr;c+=dc}
+  for(let i=0;i<n&&r>=0&&c>=0&&r<R&&c<C;i++){
+    const v=[];for(let a=r-dr,b=c-dc;a>=0&&b>=0&&a<R&&b<C&&v.length<3&&get(a,b)!=='';a-=dr,b-=dc)v.unshift(get(a,b));
+    if(!v.length)break;
+    let x=predict(v);if(x===null&&force)x=v[v.length-1];
+    if(x===null){if(!out.length){act={r,c};return 'No clear pattern yet, so I only moved to '+key(r,c)+'. Type a value, or say "repeat" to copy the previous cell'}break}
+    set(r,c,x);out.push(x);r+=dr;c+=dc;
+  }
+  if(!out.length)return '⚠ Nothing before this cell to learn a pattern from';
+  act={r:Math.max(0,Math.min(R-1,r)),c:Math.max(0,Math.min(C-1,c))};
+  return 'Pattern filled '+st.dir+': '+out.join(', ');
+}
+function shift(at,d){const nd={};for(const k in data){const p=pa(k);let r=p.r;if(d<0){if(r===at)continue;if(r>at)r--}else if(r>=at)r++;if(r<R)nd[key(r,p.c)]=data[k]}data=nd;changed.add(key(at,0))}
+function sortRows(kc,desc){
+  let r0=0,c0=0,r1=0,c1=0;const t=tables.find(t=>act.r>=t.r&&act.r<t.r+t.rows&&act.c>=t.c&&act.c<t.c+t.cols),dir=st.dir;
+  if(t){r0=t.r;c0=t.c;r1=t.r+t.rows-1;c1=t.c+t.cols-1}else{for(const k in data){const p=pa(k);r1=Math.max(r1,p.r);c1=Math.max(c1,p.c)}}
+  if(kc<c0||kc>c1)return '⚠ Column '+col(kc)+' has no data to sort';
+  const rows=[];for(let r=r0;r<=r1;r++){const a=[];for(let c=c0;c<=c1;c++)a.push(get(r,c));rows.push(a)}
+  const j=kc-c0;let head=null;
+  if(rows.length>1&&rows[0][j]!==''&&!isNum(rows[0][j])&&rows.slice(1).some(x=>isNum(x[j])))head=rows.shift();
+  OPS.push({t:'sort',r0,c0,r1,c1,kc:j,desc,head:!!head});st.dir=dir;return 'Sorted by column '+col(kc)+(desc?', high to low':', low to high');
+  rows.sort((a,b)=>{const x=a[j],y=b[j],d=(isNum(x)&&isNum(y))?x-y:String(x).localeCompare(String(y));return desc?-d:d});
+  if(head)rows.unshift(head);
+  rows.forEach((a,i)=>a.forEach((v,k)=>set(r0+i,c0+k,v)));st.dir=dir;
+  return 'Sorted by column '+col(kc)+(head?' (header kept)':'')+(desc?', high to low':', low to high');
+}
+function calc(k){
+  let r=act.r,c=act.c;
+  if(get(r,c)!==''&&!isNum(get(r,c)))r++;
+  if(isNum(get(r,c))){while(isNum(get(r+1,c)))r++;r++}
+  let top=r-1;while(top>=0&&isNum(get(top,c)))top--;top++;
+  const n=[];for(let i=top;i<r;i++)n.push(+get(i,c));
+  if(!n.length)return '⚠ No numbers found in column '+col(c);
+  const sum=n.reduce((a,b)=>a+b,0),range=col(c)+(top+1)+':'+col(c)+r;
+  if(k.startsWith('percent')){
+    if(c+1>=C)return '⚠ No column to the right';
+    n.forEach((v,i)=>{const kk=key(top+i,c+1);set(top+i,c+1,fmt(sum?v/sum*100:0)+'%');FX[kk]='='+col(c)+(top+i+1)+'/SUM('+col(c)+'$'+(top+1)+':'+col(c)+'$'+r+')';FM[kk]='0.0%'});
+    act={r,c};return 'Percentages of '+range+' in column '+col(c+1);
+  }
+  const f={total:sum,sum:sum,average:sum/n.length,avg:sum/n.length,mean:sum/n.length,max:Math.max(...n),maximum:Math.max(...n),min:Math.min(...n),minimum:Math.min(...n),count:n.length}[k];
+  set(r,c,fmt(f));FX[key(r,c)]='='+({total:'SUM',sum:'SUM',average:'AVERAGE',avg:'AVERAGE',mean:'AVERAGE',max:'MAX',maximum:'MAX',min:'MIN',minimum:'MIN',count:'COUNT'}[k])+'('+range+')';act={r,c};return k+' of '+range+' = '+fmt(f);
+}
+
+
+/* ---------- taught rules (compiled once, then run locally with no AI) ---------- */
+let uRules=[];try{uRules=JSON.parse(localStorage.getItem('xa_rules')||'[]')}catch(e){}
+const walkSt=new Set(),L1=x=>/^[a-z]$/i.test(String(x));
+function stepWalk(w,strict){
+  if(w.order==='step'){
+    const f=pa(w.from),id=w.say+w.from+w.dr+w.dc;
+    if(!strict&&!walkSt.has(id)){walkSt.add(id);if(get(act.r,act.c)===''){act={r:f.r,c:f.c};return true}}
+    let r=act.r+w.dr,c=act.c+w.dc;
+    if(c>=C||c<0){c=f.c;r=act.r+1}
+    if(r<0||r>=R)return false;
+    act={r,c};return true;
+  }
+  const cols=w.cols.map(x=>x.charCodeAt(0)-65),s0=w.startRow-1,id=w.say+w.cols.join('')+w.order;
+  let r=act.r,c=act.c;const i=cols.indexOf(c),inPath=i>=0&&r>=s0;
+  if(!strict&&!walkSt.has(id)){walkSt.add(id);if(!(inPath&&get(r,c)!=='')){act={r:s0,c:cols[0]};return true}}
+  if(!inPath){if(strict)return false;act={r:s0,c:cols[0]};return true}
+  if(w.order==='row'){if(i<cols.length-1)c=cols[i+1];else{c=cols[0];r++}}
+  else{const n=w.rows||R-s0;if(r+1<s0+n)r++;else if(i<cols.length-1){c=cols[i+1];r=s0}else r++}
+  if(r>=R)return false;
+  act={r,c};return true;
+}
+function adv(){const w=uRules.find(x=>x.type==='walk'&&x.trigger==='write');if(w&&stepWalk(w,true))return;mv(st.dir||'down')}
+function userRules(l,depth){
+  for(const w of uRules){
+    if(w.type==='walk'&&w.trigger==='next'&&l===(w.say||'next'))return stepWalk(w,false)?'Moved to '+key(act.r,act.c):'⚠ End of the sheet';
+    if(w.type==='alias'&&l===w.say&&depth<2){const o=[];for(const c of w.do){const x=one(c,depth+1);o.push(x===null?'⚠ "'+c+'" not understood':x)}return o.join(' | ')}
+  }
+  return null;
+}
+function lookupRule(s){
+  const w=uRules.find(x=>x.type==='lookup');if(!w||isNum(s))return null;
+  const q=s.toLowerCase().trim(),fc=w.find!=='any'?w.find.charCodeAt(0)-65:null,hits=[];
+  for(const k in data){const p=pa(k),v=data[k];if(isNum(v)||(fc!==null&&p.c!==fc))continue;hits.push({p,lv:v.toLowerCase().trim()})}
+  let m=hits.filter(h=>h.lv===q);
+  if(!m.length&&q.length>=2)m=hits.filter(h=>h.lv.startsWith(q));
+  if(!m.length&&q.length>=3)m=hits.filter(h=>h.lv.includes(q));
+  if(!m.length)return '⚠ "'+s+'" not found. Say "write '+s+'" to type it as new text';
+  if(m.length>1)return '⚠ '+m.length+' matches ('+m.slice(0,3).map(h=>key(h.p.r,h.p.c)).join(', ')+'), say more of the name';
+  const p=m[0].p,t=w.target;let tc;
+  if(t.col)tc=t.col.charCodeAt(0)-65;
+  else if(t.header){const h=t.header.toLowerCase();for(const k in data){if(data[k].toLowerCase().includes(h)){tc=pa(k).c;break}}if(tc===undefined)return '⚠ No column named "'+t.header+'"'}
+  else tc=p.c+t.offset;
+  if(tc>=C)return '⚠ No column there';
+  act={r:p.r,c:tc};const cur=get(p.r,tc);
+  return 'Found '+key(p.r,p.c)+' → active '+key(p.r,tc)+(cur!==''?' (already '+cur+')':' (empty, type the value)');
+}
+function okRule(r){
+  if(!r||typeof r!=='object')return null;
+  if(r.type==='walk'&&r.order==='step'){const f=pa(String(r.from||'')),dr=Math.trunc(+r.dr||0),dc=Math.trunc(+r.dc||0);if(!f||(!dr&&!dc)||Math.abs(dr)>5||Math.abs(dc)>5)return null;return{type:'walk',trigger:r.trigger==='write'?'write':'next',say:String(r.say||'next').toLowerCase(),order:'step',from:key(f.r,f.c),dr,dc}}
+  if(r.type==='walk'){const cols=(r.cols||[]).filter(L1).map(x=>String(x).toUpperCase());if(!cols.length)return null;return{type:'walk',trigger:r.trigger==='write'?'write':'next',say:String(r.say||'next').toLowerCase(),cols,order:r.order==='col'?'col':'row',startRow:Math.max(1,+r.startRow||1),rows:r.rows?+r.rows:null}}
+  if(r.type==='lookup'){const t=r.target||{};const tt=L1(t.col)?{col:String(t.col).toUpperCase()}:t.header?{header:String(t.header)}:{offset:Math.max(1,Math.min(5,+t.offset||1))};return{type:'lookup',find:L1(r.find)?String(r.find).toUpperCase():'any',target:tt}}
+  if(r.type==='alias'&&r.say&&Array.isArray(r.do)&&r.do.length)return{type:'alias',say:String(r.say).toLowerCase().trim(),do:r.do.map(String).slice(0,6)};
+  return null;
+}
+function compileLocal(t){
+  const l=t.toLowerCase(),refs=(l.match(/\b[a-z]\d{1,2}\b/g)||[]).map(pa).filter(Boolean);
+  if(refs.length>=2){
+    const trig=/after (?:i )?(?:write|type|enter|put|add|fill)|each (?:value|number|entry)|every (?:value|number|entry)|automatic/.test(l)?'write':'next',w=(l.match(/\b(next|okay|ok|done|continue)\b/)||[])[1]||'next',f=refs[0];
+    const dl=refs.slice(1).map((x,i)=>[x.r-refs[i].r,x.c-refs[i].c]);
+    if(dl.every(x=>x[0]===dl[0][0]&&x[1]===dl[0][1])&&(dl[0][0]||dl[0][1]))
+      return{type:'walk',trigger:trig,say:w,order:'step',from:key(f.r,f.c),dr:dl[0][0],dc:dl[0][1]};
+    if(refs[1].r===f.r&&refs[1].c!==f.c&&refs.some(x=>x.r===f.r+1&&x.c===f.c))
+      return{type:'walk',trigger:trig,say:w,cols:[...new Set(refs.filter(x=>x.r===f.r).map(x=>col(x.c)))],order:'row',startRow:f.r+1};
+    if(refs[1].c===f.c&&refs[1].r!==f.r&&refs.some(x=>x.c===f.c+1&&x.r===f.r))
+      return{type:'walk',trigger:trig,say:w,cols:[...new Set(refs.map(x=>col(x.c)))],order:'col',startRow:f.r+1,rows:refs.filter(x=>x.c===f.c).length};
+  }
+  if(/(find|search|locate|look)/.test(l)&&/(name)/.test(l)&&/(next to|beside|right|adjacent|next column|side|column)/.test(l)){
+    const m=l.match(/\bcolumn\s+([a-z])\b/);
+    return{type:'lookup',find:'any',target:(m&&!/(next to|beside|adjacent)/.test(l))?{col:m[1]}:{offset:1}};
+  }
+  return null;
+}
+function describe(r){
+  if(r.type==='walk'&&r.order==='step'){const f=pa(r.from),cs=[0,1,2].map(i=>key(f.r+i*r.dr,f.c+i*r.dc));return (r.trigger==='write'?'After each value you type':'When you say "'+r.say+'"')+': go '+cs.join(' → ')+' … and keep going the same way'}
+  if(r.type==='walk'){const st0=r.startRow,cs=r.cols;return (r.trigger==='write'?'After each value you type':'When you say "'+r.say+'"')+': go '+cs.map(c=>c+st0).join(' → ')+(r.order==='row'?' → '+cs[0]+(st0+1)+' …':' down …')}
+  if(r.type==='lookup'){const t=r.target;return 'Say a name → find it'+(r.find!=='any'?' in column '+r.find:'')+' and activate '+(t.col?'column '+t.col+' in that row':t.header?'the "'+t.header+'" column in that row':t.offset+' column(s) to its right')}
+  return '"'+r.say+'" → '+r.do.join(', ');
+}
+
+/* ---------- AI fallback (only when rules fail) ---------- */
+const LS=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}};
+const BAD=/whisper|tts|guard|playai|orpheus|embed|image|vision|live|audio|aqa|imagen|veo|robotics|computer-use|gemma-3n|safeguard/i;
+const PREF={groq:['llama-3.3-70b-versatile','openai/gpt-oss-120b','openai/gpt-oss-20b','llama-3.1-8b-instant','meta-llama/llama-4-scout-17b-16e-instruct'],gemini:['gemini-2.5-flash','gemini-flash-latest','gemini-2.5-flash-lite','gemini-2.0-flash']};
+let mcache={},busy={},good=null;
+const gk=()=>$('gkey').value.trim(),mk=()=>$('mkey').value.trim();
+async function listModels(p){
+  if(mcache[p])return mcache[p];
+  let ids;
+  if(p==='groq'){const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+gk()}}),j=await r.json();if(!r.ok)throw new Error(j.error?.message||r.status);ids=j.data.map(m=>m.id)}
+  else{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key='+encodeURIComponent(mk())),j=await r.json();if(!r.ok)throw new Error(j.error?.message||r.status);ids=j.models.filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''))}
+  ids=ids.filter(i=>!BAD.test(i)&&(p==='groq'||/^gemini/.test(i)));
+  const pf=PREF[p].filter(i=>ids.includes(i)),fast=x=>/flash|instant|8b|20b/.test(x)?1:0;
+  return mcache[p]=pf.concat(ids.filter(i=>!pf.includes(i)).sort((a,b)=>fast(b)-fast(a)));
+}
+async function callModel(p,m,text,sys){
+  let r,j;const bad=(r,j)=>Object.assign(new Error(j.error?.message||r.status),{st:r.status});
+  if(p==='groq'){
+    r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+gk()},body:JSON.stringify({model:m,temperature:0,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:text}]})});
+    j=await r.json();if(!r.ok)throw bad(r,j);return j.choices[0].message.content;
+  }
+  r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+m+':generateContent?key='+encodeURIComponent(mk()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text}]}],generationConfig:{responseMimeType:'application/json',temperature:0}})});
+  j=await r.json();if(!r.ok)throw bad(r,j);return j.candidates[0].content.parts.map(x=>x.text||'').join('');
+}
+async function callAI(text,sys){
+  const provs=[];if(gk())provs.push('groq');if(mk())provs.push('gemini');
+  if(!provs.length)throw new Error('add a Groq or Gemini key in Settings');
+  const errs=[],lists={};
+  for(const p of provs){try{lists[p]=await listModels(p)}catch(e){errs.push(p+' model list: '+e.message);lists[p]=PREF[p]}}
+  const cand=[];if(good&&provs.includes(good.p))cand.push(good);
+  for(let i=0;i<8;i++)for(const p of provs)if(lists[p][i])cand.push({p,m:lists[p][i]});
+  let tries=0;
+  for(const {p,m} of cand){
+    if(busy[p+m]>Date.now())continue;
+    if(++tries>6)break;
+    try{const out=await callModel(p,m,text,sys);good={p,m};return{out,model:p+'/'+m}}
+    catch(e){errs.push(m+': '+String(e.message).slice(0,90));busy[p+m]=Date.now()+((e.st===429||e.st>=500)?60000:600000)}
+  }
+  throw new Error(errs.slice(0,3).join(' | ')||'all models are busy, try again in a minute');
+}
+async function ai(text){
+  if(!gk()&&!mk())return '⚠ Rules did not understand this. Add a Groq or Gemini key in Settings so AI can handle it.';
+  const ctx=Object.entries(data).slice(0,400).map(([a,v])=>a+'='+v).join(' | ');
+  const sys='You operate a spreadsheet grid (columns A-Z, rows 1-500). Reply ONLY with JSON: {"actions":[{"op":"set","cell":"B2","value":"22"},{"op":"move","cell":"A5"}],"say":"short summary"}. Compute any numbers yourself and write plain values, no formulas. Touch only the cells needed. Active cell: '+key(act.r,act.c)+'. Current data: '+(ctx||'(empty)');
+  try{
+    const {out,model}=await callAI(text,sys),mt=out.match(/\{[\s\S]*\}/),o=JSON.parse(mt?mt[0]:out);let n=0;
+    for(const a of o.actions||[]){const p=pa(String(a.cell||''));if(!p)continue;if(a.op==='set'){set(p.r,p.c,a.value??'');n++}if(a.op==='move')act=p}
+    return (o.say||'Done')+' ('+n+' cells, '+model+')';
+  }catch(e){return '⚠ AI error: '+e.message+(/fetch/i.test(e.message)?'. Open this file in Chrome from your Downloads, not inside the Claude app preview':'')}
+}
+
+const TEACH_SYS='You convert a user\'s instruction into ONE rule for a spreadsheet helper. Reply ONLY JSON {"rule":{...},"say":"plain summary"} or {"error":"what is unclear"}. Rule types: 1) {"type":"walk","trigger":"next"|"write","say":"next","cols":["A","B"],"order":"row"|"col","startRow":1,"rows":null} pressing the phrase (or, for trigger write, after every typed value) moves the active cell through the columns: row order = A1,B1,A2,B2...; col order = down each column (rows = rows per column). Prefer this for a simple line: {"type":"walk","trigger":"next","say":"next","order":"step","from":"A1","dr":0,"dc":1} moves by a constant step and keeps going (dc=1 goes right A1,B1,C1,D1...; dr=1 goes down; dc=2 skips a column). 2) {"type":"lookup","find":"any"|"A","target":{"offset":1}|{"col":"C"}|{"header":"roll no"}} when the user says a bare name that exists in the sheet, find it and activate the cell to its right (offset), in a column letter, or in the column whose header matches. 3) {"type":"alias","say":"phrase","do":["go to A1","next","total"]} a phrase that runs built-in commands: go to A1, go to first empty B, go left/right/up/down, next, repeat, total, average, percentage, sort B desc, clear, undo, delete row N, insert row N. Columns A-Z, rows 1-500.';
+async function teach(text){
+  let r=compileLocal(text),usedAI=false;
+  if(!r){
+    if(!gk()&&!mk())return{msg:'⚠ I could not read that rule offline. Try: "when I say next go A1, B1, A2" or add an AI key in Settings'};
+    try{const {out}=await callAI(text,TEACH_SYS),mt=out.match(/\{[\s\S]*\}/),o=JSON.parse(mt?mt[0]:out);usedAI=true;if(o.error)return{msg:'⚠ '+o.error,ai:true};r=o.rule}
+    catch(e){return{msg:'⚠ AI error: '+e.message+(/fetch/i.test(e.message)?'. Open this file in Chrome, not the Claude app preview':''),ai:true}}
+  }
+  r=okRule(r);if(!r)return{msg:'⚠ I could not turn that into a rule. Try describing it differently',ai:usedAI};
+  uRules=uRules.filter(x=>!(x.type===r.type&&(r.type==='lookup'||(r.type==='alias'?x.say===r.say:(x.trigger===r.trigger&&x.say===r.say)))));
+  uRules.push(r);walkSt.clear();
+  return{msg:'Learned: '+describe(r),ai:usedAI,ok:true};
+}
+function renderRules(){
+  try{localStorage.setItem('xa_rules',JSON.stringify(uRules))}catch(e){}
+  $('rc').textContent=uRules.length;
+  $('rl').innerHTML=uRules.length?uRules.map((r,i)=>'<div>'+esc(describe(r))+'<button data-i="'+i+'">✕</button></div>').join(''):'<div style="color:var(--mut)">No rules yet. Tap 🧠 and explain one, or type: rule: when I say next go to A1, B1, A2</div>';
+}
+let teachOn=false;
+const TEACHRE=/^(?:teach\s*[:\-]?\s*|rule\s*[:\-]\s*|role\s*[:\-]\s*)(.+)$|^((?:when|if) i (?:say|type|press|write).+)$/i;
+function setTeach(v){teachOn=v;$('teach').classList.toggle('on',v);$('cmd').placeholder=v?'Explain the rule in your own words…':'e.g. 22 in front of Ravi'}
+
+/* ---------- real Excel bridge ---------- */
+let xu=[],xr=[],base={},fbase={};
+const snap=()=>JSON.stringify({data,tables,act,st});
+function restore(s){({data,tables,act,st}=JSON.parse(s))}
+const enc=v=>(v!==''&&/^0\d/.test(v)&&!v.startsWith('='))?"'"+v:v;
+function wr(ws,k,v){const p=pa(k),g=ws.getRangeByIndexes(p.r,p.c,1,1);if(v==='')g.clear('Contents');else g.formulas=[[enc(v)]]}
+function clearFx(){OPS.length=0;for(const k in FX)delete FX[k];for(const k in FM)delete FM[k]}
+async function loadSheet(){
+  await Excel.run(async ctx=>{
+    const ws=ctx.workbook.worksheets.getActiveWorksheet(),sel=ctx.workbook.getSelectedRange();
+    sel.load('rowIndex,columnIndex');
+    const rg=ws.getRangeByIndexes(0,0,R,C);rg.load('values,formulas');
+    await ctx.sync();
+    data={};base={};fbase={};
+    for(let r=0;r<R;r++){const vr=rg.values[r],fr=rg.formulas[r];for(let c=0;c<C;c++){const v=vr[c];if(v!==''&&v!==null){const k=key(r,c);data[k]=String(v);base[k]=data[k];fbase[k]=String(fr[c])}}}
+    act={r:Math.min(sel.rowIndex,R-1),c:Math.min(sel.columnIndex,C-1)};
+  });
+}
+async function apply(){
+  const ent=[];
+  await Excel.run(async ctx=>{
+    const ws=ctx.workbook.worksheets.getActiveWorksheet();
+    const ks=new Set([...Object.keys(base),...Object.keys(data),...Object.keys(FX)]);
+    for(const k of ks){
+      const nv=data[k]??'',ov=base[k]??'';
+      if(nv===ov&&!FX[k])continue;
+      const w=FX[k]??nv;ent.push({k,o:fbase[k]??'',n:w});
+      wr(ws,k,w);
+      if(FM[k]){const p=pa(k);ws.getRangeByIndexes(p.r,p.c,1,1).numberFormat=[[FM[k]]]}
+    }
+    for(const o of OPS){
+      if(o.t==='del')ws.getRange((o.r+1)+':'+(o.r+1)).delete('Up');
+      if(o.t==='ins')ws.getRange((o.r+1)+':'+(o.r+1)).insert('Down');
+      if(o.t==='bold')ws.getRangeByIndexes(o.r,o.c,1,o.n).format.font.bold=true;
+      if(o.t==='sort')ws.getRangeByIndexes(o.r0,o.c0,o.r1-o.r0+1,o.c1-o.c0+1).sort.apply([{key:o.kc,ascending:!o.desc}],false,o.head);
+      if(o.t==='table'){const g=ws.getRangeByIndexes(o.r,o.c,o.rows,o.cols),B=g.format.borders;
+        for(const e of ['EdgeTop','EdgeBottom','EdgeLeft','EdgeRight'])B.getItem(e).style='Continuous';
+        if(o.rows>1)B.getItem('InsideHorizontal').style='Continuous';
+        if(o.cols>1)B.getItem('InsideVertical').style='Continuous'}
+    }
+    ws.getRangeByIndexes(act.r,act.c,1,1).select();
+    await ctx.sync();
+  });
+  if(ent.length){xu.push(ent);if(xu.length>40)xu.shift();xr=[]}
+  clearFx();return ent.length;
+}
+async function replay(list,useNew){
+  await Excel.run(async ctx=>{
+    const ws=ctx.workbook.worksheets.getActiveWorksheet();
+    for(const x of list)wr(ws,x.k,useNew?x.n:x.o);
+    const p=pa(list[0].k);ws.getRangeByIndexes(p.r,p.c,1,1).select();await ctx.sync();
+  });
+}
+function log(t,res,mode){
+  const d=document.createElement('div');
+  d.innerHTML='<span class="bd '+(mode==='ai'?'ai':'')+'">'+(mode==='ai'?'🤖 AI':'⚡ rule')+'</span><b>'+esc(t)+'</b> → '+esc(res);
+  $('log').prepend(d);while($('log').children.length>6)$('log').lastChild.remove();
+  $('stats').textContent='Commands: '+stats.cmd+' · rules: '+(stats.cmd-stats.ai)+' · AI calls: '+stats.ai;
+}
+async function run(text){
+  text=text.trim();if(!text)return;
+  {const tm=text.match(TEACHRE);
+   if((teachOn&&!/^(undo|redo)$/i.test(text))||tm){
+     const t=teachOn?text:(tm[1]||tm[2]);stats.cmd++;const o=await teach(t);
+     if(o.ai)stats.ai++;if(o.ok)setTeach(false);
+     log(text,o.msg,o.ai?'ai':'rule');renderRules();return;
+   }}
+  try{
+    if(/^undo$/i.test(text)){stats.cmd++;const e=xu.pop();if(!e){log(text,'Nothing to undo','rule');return}await replay(e,false);xr.push(e);log(text,'Undid '+e.length+' cell(s)','rule');return}
+    if(/^redo$/i.test(text)){stats.cmd++;const e=xr.pop();if(!e){log(text,'Nothing to redo','rule');return}await replay(e,true);xu.push(e);log(text,'Redid '+e.length+' cell(s)','rule');return}
+    stats.cmd++;clearFx();
+    await loadSheet();
+    const before=snap();
+    let res=rules(text),mode='rule';
+    if(res===null){restore(before);clearFx();mode='ai';stats.ai++;res=await ai(text)}
+    const n=await apply();
+    log(text,res+(n?'  ['+n+' cell'+(n>1?'s':'')+' changed]':''),mode);
+  }catch(e){clearFx();log(text,'⚠ Excel error: '+(e.message||e),'rule')}
+  showSel();
+}
+async function showSel(){try{await Excel.run(async ctx=>{const s=ctx.workbook.getSelectedRange();s.load('address');await ctx.sync();$('nb').textContent=s.address.split('!').pop()})}catch(e){}}
+$('teach').onclick=()=>{setTeach(!teachOn);$('cmd').focus()};
+$('rl').addEventListener('click',e=>{const b=e.target.closest('button');if(b){uRules.splice(+b.dataset.i,1);walkSt.clear();renderRules()}});
+$('run').onclick=()=>{const v=$('cmd').value;$('cmd').value='';run(v)};
+$('cmd').addEventListener('keydown',e=>{if(e.key==='Enter')$('run').click()});
+$('chips').addEventListener('click',e=>{const b=e.target.closest('button');if(b)run(b.dataset.c)});
+['gkey','mkey','lang'].forEach(id=>{const v=LS('xa_'+id);if(v)$(id).value=v;$(id).addEventListener('input',()=>{LS('xa_'+id,$(id).value);mcache={};busy={};good=null})});
+$('test').onclick=async()=>{
+  $('tst').textContent=' testing...';
+  try{const r=await callAI('hi','Reply ONLY with JSON {"say":"ok"}');$('tst').textContent=' ✅ working: '+r.model}
+  catch(e){$('tst').textContent=' ⚠ '+e.message}
+};
+Office.onReady(()=>{renderRules();showSel();try{Office.context.document.addHandlerAsync(Office.EventType.DocumentSelectionChanged,showSel)}catch(e){}log('ready','Click a cell in your sheet, then give a command','rule')});
+/* ---------- voice ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,listening=false;
+$('mic').onclick=()=>{
+  if(!SR){alert('Voice is not available inside this Excel pane. Press Win+H (Windows voice typing) while the command box is selected.');return}
+  if(listening){listening=false;rec&&rec.stop();$('mic').classList.remove('on');return}
+  rec=new SR();rec.lang=$('lang').value;rec.continuous=$('hf').checked;rec.interimResults=false;
+  rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)run(e.results[i][0].transcript)};
+  rec.onend=()=>{if(listening&&$('hf').checked)try{rec.start()}catch(e){}else{listening=false;$('mic').classList.remove('on')}};
+  listening=true;$('mic').classList.add('on');rec.start();
+};
+
+</script>
+</body></html>
